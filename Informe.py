@@ -12,7 +12,7 @@ import base64
 # =========================================================
 # 1. ENLAZAR EXCEL Y PREPARAR DATOS COMERCIALES
 # =========================================================
-archivo_excel = 'Informe_Tribu.xlsx'
+archivo_excel = 'tu_archivo.xlsx'
 
 df_ventas_raw = pd.read_excel(archivo_excel, sheet_name='ventas totales')
 df_maquilas_raw = pd.read_excel(archivo_excel, sheet_name='maquilas')
@@ -44,6 +44,7 @@ df_final = pd.merge(df_final, df_clientes_activos, on='Mes', how='left')
 df_final = pd.merge(df_final, df_clientes_nuevos, on='Mes', how='left')
 df_final['Mes_Orden'] = df_final['Mes'].map(posicion_meses)
 df_final = df_final.sort_values('Mes_Orden').drop(columns=['Mes_Orden']).fillna(0)
+df_final = df_final[df_final['Mes'].isin(columnas_master)]
 
 # CÁLCULOS EXCLUSIVOS PARA RECUADROS KPI
 ventas_totales_global = df_final['Ventas'].sum()
@@ -62,24 +63,61 @@ ciudad_lider_ventas = ciudad_lider_info['Ventas']
 promedio_mensual_por_cliente = (ventas_totales_global / total_clientes_unicos) / len(columnas_master)
 
 # =========================================================
-# PREPARACIÓN MATEMÁTICA CONSOLIDADA (K-MEANS)
+# PRE-CALCULAR TODOS LOS GRÁFICOS (MÁXIMA VELOCIDAD PARA NUBE)
 # =========================================================
-df_perf_km = df_ventas_melt[df_ventas_melt['Ventas'] > 0].groupby('Nombre').agg(
-    Total_Anual=('Ventas', 'sum'),
-    Promedio_Mensual=('Ventas', 'mean'),
-    Meses_Activos=('Mes', 'count')
-).reset_index()
 
+# --- GRÁFICOS PESTAÑA RESUMEN ---
+fig_comercial = px.line(df_final, x='Mes', y=['Ventas', 'Maquilas'], labels={'value': 'Monto ($)', 'variable': 'Métrica'}, template="plotly_white", color_discrete_sequence=["#0d6efd", "#ffc107"])
+fig_comercial.update_layout(margin=dict(l=20, r=20, t=10, b=20), legend=dict(orientation="h", y=1.1))
+
+df_ciudades = df_ventas_melt.groupby('Ciudad', as_index=False)['Ventas'].sum()
+fig_pastel = px.pie(df_ciudades, values='Ventas', names='Ciudad', title="Participación de Ventas por Ciudad", hole=0.4, template="plotly_white")
+fig_pastel.update_traces(textinfo='percent', textposition='inside')
+fig_pastel.update_layout(showlegend=True, legend=dict(orientation="v", align="left"))
+
+df_top_10 = df_ranking_clientes.sort_values('Ventas', ascending=False).head(10)
+fig_top_10 = px.bar(df_top_10, x='Ventas', y='Nombre', orientation='h', template="plotly_white", color='Ventas', color_continuous_scale="Blues", text_auto='.2s')
+fig_top_10.update_layout(yaxis={'categoryorder': 'total ascending'}, showlegend=False, coloraxis_showscale=False, margin=dict(l=20, r=20, t=10, b=20))
+fig_top_10.update_traces(textposition='outside', cliponaxis=False)
+
+fig_clientes = px.bar(df_final, x='Mes', y=['Clientes_Mensuales', 'Clientes_Nuevos'], barmode='group', template="plotly_white", color_discrete_sequence=["#198754", "#0dcaf0"])
+fig_clientes.update_layout(margin=dict(l=20, r=20, t=10, b=20), legend=dict(orientation="h", y=1.1))
+
+# --- GRÁFICOS PESTAÑA HEATMAP ---
+df_heatmap_data = df_ventas_melt.pivot_table(index='Ciudad', columns='Mes', values='Ventas', aggfunc='sum').fillna(0)
+df_heatmap_data = df_heatmap_data[columnas_master]
+fig_real_heatmap = px.imshow(df_heatmap_data.values, x=df_heatmap_data.columns, y=df_heatmap_data.index, text_auto=".2s", color_continuous_scale="Viridis", aspect="auto")
+fig_real_heatmap.update_layout(title_text='Mapa de Calor: Distribución de Ventas por Ciudad y Mes', title_x=0.5, margin=dict(t=50, b=20))
+
+# --- GRÁFICOS PESTAÑA K-MEANS ---
+df_perf_km = df_ventas_melt[df_ventas_melt['Ventas'] > 0].groupby('Nombre').agg(Total_Anual=('Ventas', 'sum'), Promedio_Mensual=('Ventas', 'mean'), Meses_Activos=('Mes', 'count')).reset_index()
 X_km = df_perf_km[['Promedio_Mensual', 'Total_Anual']].values
 
-# Curvas matemáticas de Codo e Inercia
-inercias = []
-siluetas = []
-rango_k = list(range(2, 9))
+inercias, siluetas, rango_k = [], [], list(range(2, 9))
 for k in rango_k:
     km_temp = KMeans(n_clusters=k, random_state=42, n_init=10).fit(X_km)
     inercias.append(km_temp.inertia_)
     siluetas.append(silhouette_score(X_km, km_temp.labels_))
+
+fig_eval = go.Figure()
+fig_eval.add_trace(go.Scatter(x=rango_k, y=inercias, name="Inercia (Codo)", mode='lines+markers', yaxis='y1', line=dict(color='#0d6efd', width=3)))
+fig_eval.add_trace(go.Scatter(x=rango_k, y=siluetas, name="Silueta", mode='lines+markers', yaxis='y2', line=dict(color='#198754', width=3, dash='dash')))
+fig_eval.update_layout(title="Método del Codo + Silueta", template="plotly_white", xaxis=dict(title="Número de Clusters (K)"), yaxis=dict(title="Inercia", titlefont=dict(color="#0d6efd"), tickfont=dict(color="#0d6efd")), yaxis2=dict(title="Score Silueta", titlefont=dict(color="#198754"), tickfont=dict(color="#198754"), overlaying='y', side='right'), legend=dict(orientation="h", y=1.1))
+
+km_final = KMeans(n_clusters=3, random_state=42, n_init=10).fit(X_km)
+df_perf_km['Cluster'] = km_final.labels_
+fig_cluster_scatter = px.scatter(df_perf_km, x='Promedio_Mensual', y='Total_Anual', color=df_perf_km['Cluster'].astype(str), size='Total_Anual', hover_data=['Nombre'], labels={'Promedio_Mensual': 'Promedio mensual ($)', 'Total_Anual': 'Total anual ($)'}, title="Clusters K=3 — Promedio mensual vs Total anual", template="plotly_white")
+fig_cluster_scatter.update_layout(margin=dict(l=20, r=20, t=40, b=20))
+
+resumen_clusters = df_perf_km.groupby('Cluster').agg(N_empresas=('Nombre', 'count'), Total_Anual_Sum=('Total_Anual', 'sum'), Promedio_Mensual_Mean=('Promedio_Mensual', 'mean'), Meses_Activos_Mean=('Meses_Activos', 'mean')).reset_index()
+tabla_data = []
+for _, row in resumen_clusters.iterrows():
+    tabla_data.append({
+        'Cluster': f"Cluster {int(row['Cluster'])}", 'N_empresas': int(row['N_empresas']),
+        'Total_Anual': f"${row['Total_Anual_Sum']:,.1f}M" if row['Total_Anual_Sum'] >= 1e6 else f"${row['Total_Anual_Sum']:,.0f}K",
+        'Promedio_Mensual': f"${row['Promedio_Mensual_Mean']:,.1f}M" if row['Promedio_Mensual_Mean'] >= 1e6 else f"${row['Promedio_Mensual_Mean']:,.0f}K",
+        'Meses_Activos': f"{row['Meses_Activos_Mean']:.2f}"
+    })
 
 try:
     encoded_image = base64.b64encode(open('logo.png', 'rb').read())
@@ -88,19 +126,14 @@ except Exception:
     logo_src = ""
 
 # =========================================================
-# 2. INTERFAZ GRÁFICA (DASH)
+# 2. CONFIGURACIÓN E INTERFAZ (DASH)
 # =========================================================
-app = dash.Dash(
-    __name__, 
-    external_stylesheets=[dbc.themes.FLATLY, "https://googleapis.com"],
-    title="Dashboard Comercial Avanzado"
-)
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.FLATLY, "https://googleapis.com"], title="Dashboard Comercial Avanzado")
 server = app.server
 
 CARD_STYLE = {"box-shadow": "0 4px 15px rgba(0, 0, 0, 0.05)", "border-radius": "15px", "padding": "25px", "border": "none", "background-color": "#ffffff"}
 
 app.layout = dbc.Container([
-    # Encabezado B2B
     dbc.Row([
         dbc.Col([
             html.Div([
@@ -108,13 +141,9 @@ app.layout = dbc.Container([
                 html.H6("ASPM - CANAL B2B", className="text-muted fw-bold", style={'font-size': '11px', 'letter-spacing': '1.5px', 'margin': '0'})
             ], style={'display': 'flex', 'flex-direction': 'column', 'align-items': 'flex-start'})
         ], width=4, className="d-flex align-items-center pt-3"),
-        
-        dbc.Col([
-            html.H3("Panel Analítico Comercial", className="fw-bold text-end text-dark m-0 w-100")
-        ], width=8, className="d-flex align-items-center justify-content-end pt-3")
+        dbc.Col([html.H3("Panel Analítico Comercial", className="fw-bold text-end text-dark m-0 w-100")], width=8, className="d-flex align-items-center justify-content-end pt-3")
     ], className="mb-3 border-bottom pb-3"),
     
-    # Menú de Pestañas con Logos exactos requeridos
     dcc.Tabs(id="tabs-navegacion", value='tab-principal', children=[
         dcc.Tab(label='📌 Resumen', value='tab-principal'),
         dcc.Tab(label='🌡️ Heatmap & Pearson', value='tab-pearson'),
@@ -125,47 +154,6 @@ app.layout = dbc.Container([
 ], fluid=True)
 
 # =========================================================
-# 3. COMPORTAMIENTO INTERACTIVO DE PESTAÑAS
+# 3. INTERRUPTOR ULTRA RÁPIDO DE PESTAÑAS (MUESTRA PRECALCULADOS)
 # =========================================================
-@app.callback(
-    Output('contenido-pestana', 'children'),
-    [Input('tabs-navegacion', 'value')]
-)
-def alternar_pestanas(tab_seleccionada):
-    if tab_seleccionada == 'tab-principal':
-        fig_comercial = px.line(df_final, x='Mes', y=['Ventas', 'Maquilas'], labels={'value': 'Monto ($)', 'variable': 'Métrica'}, template="plotly_white", color_discrete_sequence=["#0d6efd", "#ffc107"])
-        fig_comercial.update_layout(margin=dict(l=20, r=20, t=10, b=20), legend=dict(orientation="h", y=1.1))
-        
-        # CORRECCIÓN DE PASTEL: Remover líneas exteriores y fijar leyendas limpias a un lado
-        df_ciudades = df_ventas_melt.groupby('Ciudad', as_index=False)['Ventas'].sum()
-        fig_pastel = px.pie(df_ciudades, values='Ventas', names='Ciudad', title="Participación de Ventas por Ciudad", hole=0.4, template="plotly_white")
-        fig_pastel.update_traces(textinfo='percent', textposition='inside')
-        fig_pastel.update_layout(showlegend=True, legend=dict(orientation="v", align="left"))
-        
-        # CORRECCIÓN TOP 10: Limpio, solo nombres y acumulado frente a cada barra horizontal
-        df_top_10 = df_ranking_clientes.sort_values('Ventas', ascending=False).head(10)
-        fig_top_10 = px.bar(
-            df_top_10, x='Ventas', y='Nombre', orientation='h',
-            template="plotly_white", color='Ventas', color_continuous_scale="Blues", text_auto='.2s'
-        )
-        fig_top_10.update_layout(yaxis={'categoryorder': 'total ascending'}, showlegend=False, coloraxis_showscale=False, margin=dict(l=20, r=20, t=10, b=20))
-        fig_top_10.update_traces(textposition='outside', cliponaxis=False)
-        
-        fig_clientes = px.bar(df_final, x='Mes', y=['Clientes_Mensuales', 'Clientes_Nuevos'], barmode='group', template="plotly_white", color_discrete_sequence=["#198754", "#0dcaf0"])
-        fig_clientes.update_layout(margin=dict(l=20, r=20, t=10, b=20), legend=dict(orientation="h", y=1.1))
-        
-        return html.Div([
-            # 4 Recuadros Grandes estilo Compañero
-            dbc.Row([
-                dbc.Col(dbc.Card([html.H6("1. DESEMPEÑO GLOBAL COMERCIAL", className="text-muted small fw-bold mb-2"), html.H3(f"${ventas_totales_global:,.2f}", className="text-primary fw-bold mb-1"), html.P(f"Clientes Activos Totales: {total_clientes_unicos}", className="text-secondary small m-0 fw-medium")], style=CARD_STYLE), width=3),
-                dbc.Col(dbc.Card([html.H6("2. CLIENTE TOP MUNDIAL", className="text-muted small fw-bold mb-2"), html.H5(f"{cliente_top_nombre}", className="text-dark fw-bold text-truncate mb-1"), html.P(f"Total de Compra: ${cliente_top_ventas:,.2f}", className="text-success small m-0 fw-medium")], style=CARD_STYLE), width=3),
-                dbc.Col(dbc.Card([html.H6("3. CIUDAD LÍDER EN MERCADO", className="text-muted small fw-bold mb-2"), html.H3(f"{ciudad_lider_nombre}", className="text-warning fw-bold mb-1"), html.P(f"Aporte Región: ${ciudad_lider_ventas:,.2f}", className="text-secondary small m-0 fw-medium")], style=CARD_STYLE), width=3),
-                dbc.Col(dbc.Card([html.H6("4. PROMEDIO MENSUAL POR CLIENTE", className="text-muted small fw-bold mb-2"), html.H3(f"${promedio_mensual_por_cliente:,.2f}", className="text-info fw-bold mb-1"), html.P("Cálculo medio ponderado", className="text-secondary small m-0")], style=CARD_STYLE), width=3),
-            ], className="g-3 mb-4"),
-            
-            dbc.Row([
-                dbc.Col(dbc.Card([html.H5("Evolución Mensual Comercial", className="fw-bold text-secondary mb-3"), dcc.Graph(figure=fig_comercial)], style=CARD_STYLE), width=6),
-                dbc.Col(dbc.Card([html.H5("Distribución Geográfica", className="fw-bold text-secondary mb-3"), dcc.Graph(figure=fig_pastel)], style=CARD_STYLE), width=6),
-            ], className="g-3 mb-4"),
-
-            dbc.Row])
+@app.callback()
