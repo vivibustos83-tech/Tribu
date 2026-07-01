@@ -1,0 +1,6 @@
+dash==2.14.0
+dash-bootstrap-components
+pandas
+openpyxl
+scikit-learn
+gunicorn
