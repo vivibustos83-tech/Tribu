@@ -166,6 +166,4 @@ def alternar_pestanas(tab_seleccionada):
                 dbc.Col(dbc.Card([html.H6("2. CLIENTE TOP MUNDIAL", className="text-muted small fw-bold mb-2"), html.H5(f"{cliente_top_nombre}", className="text-dark fw-bold text-truncate mb-1"), html.P(f"Total de Compra: ${cliente_top_ventas:,.2f}", className="text-success small m-0 fw-medium")], style=CARD_STYLE), width=3),
                 dbc.Col(dbc.Card([html.H6("3. CIUDAD LÍDER EN MERCADO", className="text-muted small fw-bold mb-2"), html.H3(f"{ciudad_lider_nombre}", className="text-warning fw-bold mb-1"), html.P(f"Aporte Región: ${ciudad_lider_ventas:,.2f}", className="text-secondary small m-0 fw-medium")], style=CARD_STYLE), width=3),
                 dbc.Col(dbc.Card([html.H6("4. PROMEDIO MENSUAL POR CLIENTE", className="text-muted small fw-bold mb-2"), html.H3(f"${promedio_mensual_por_cliente:,.2f}", className="text-info fw-bold mb-1"), html.P("Cálculo medio ponderado", className="text-secondary small m-0")], style=CARD_STYLE), width=3),
-            ], className="g-3 mb-4"),
-            
-            dbc.Row([
+            ], className="g-3 mb-4")
