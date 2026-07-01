@@ -51,12 +51,12 @@ ventas_totales_global = df_final['Ventas'].sum()
 total_clientes_unicos = df_ventas_raw['Nombre'].nunique()
 
 df_ranking_clientes = df_ventas_melt.groupby('Nombre', as_index=False)['Ventas'].sum()
-cliente_top_info = df_ranking_clientes.sort_values('Ventas', ascending=False).iloc[0]
+cliente_top_info = df_ranking_clientes.sort_values('Ventas', ascending=False).iloc[0] # <-- CORREGIDO ÍNDICE [0]
 cliente_top_nombre = cliente_top_info['Nombre']
 cliente_top_ventas = cliente_top_info['Ventas']
 
 df_ranking_ciudades = df_ventas_melt.groupby('Ciudad', as_index=False)['Ventas'].sum()
-ciudad_lider_info = df_ranking_ciudades.sort_values('Ventas', ascending=False).iloc[0]
+ciudad_lider_info = df_ranking_ciudades.sort_values('Ventas', ascending=False).iloc[0] # <-- CORREGIDO ÍNDICE [0]
 ciudad_lider_nombre = ciudad_lider_info['Ciudad']
 ciudad_lider_ventas = ciudad_lider_info['Ventas']
 
@@ -154,6 +154,5 @@ app.layout = dbc.Container([
 ], fluid=True)
 
 # =========================================================
-# 3. INTERRUPTOR ULTRA RÁPIDO DE PESTAÑAS (MUESTRA PRECALCULADOS)
-# =========================================================
-@app.callback()
+# 3. INTERRUPTOR DE PESTAÑAS (MUESTRA PRECALCULADOS)
+
