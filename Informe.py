@@ -5,14 +5,13 @@ from dash.dependencies import Input, Output
 import pandas as pd
 import plotly.express as px
 from sklearn.cluster import KMeans
-import base64  # Requerido para procesar el logotipo de forma segura
+import base64
 
 # =========================================================
 # 1. ENLAZAR EXCEL Y PREPARAR DATOS
 # =========================================================
 archivo_excel = 'Informe_Tribu.xlsx'
 
-# Leer las hojas del archivo Excel
 df_ventas_raw = pd.read_excel(archivo_excel, sheet_name='ventas totales')
 df_maquilas_raw = pd.read_excel(archivo_excel, sheet_name='maquilas')
 
@@ -20,38 +19,30 @@ meses_ventas = [col for col in df_ventas_raw.columns if col not in ['Nombre', 'C
 meses_maquilas = [col for col in df_maquilas_raw.columns if col not in ['Nombre', 'Ciudad']]
 columnas_master = meses_ventas 
 
-# A. Desenrollar VENTAS a formato vertical
 df_ventas_melt = df_ventas_raw.melt(id_vars=['Nombre', 'Ciudad'], var_name='Mes', value_name='Ventas').fillna(0)
 df_maquilas_melt = df_maquilas_raw.melt(id_vars=['Nombre', 'Ciudad'], var_name='Mes', value_name='Maquilas').fillna(0)
 
-# B. LÓGICA DE CLIENTES (A partir de ventas reales > 0)
 df_compras_reales = df_ventas_melt[df_ventas_melt['Ventas'] > 0].copy()
 df_clientes_activos = df_compras_reales.groupby('Mes')['Nombre'].nunique().reset_index(name='Clientes_Mensuales')
 
-# Clientes Nuevos
 posicion_meses = {mes: i for i, mes in enumerate(columnas_master)}
 df_compras_reales['Mes_Orden'] = df_compras_reales['Mes'].map(posicion_meses)
 df_primera_compra = df_compras_reales.sort_values('Mes_Orden').groupby('Nombre')['Mes'].first().reset_index()
+df_primera_compra.columns = ['Nombre', 'Mes']
 df_clientes_nuevos = df_primera_compra.groupby('Mes')['Nombre'].count().reset_index(name='Clientes_Nuevos')
 
-# C. Desenrollar MAQUILAS a formato vertical
-df_maquilas_melt = df_maquilas_raw.melt(id_vars=['Nombre', 'Ciudad'], var_name='Mes', value_name='Maquilas')
 df_maquilas_mensual = df_maquilas_melt.groupby('Mes', as_index=False)['Maquilas'].sum()
-
-# D. Sumar Ventas totales mensuales
 df_ventas_mensual = df_ventas_melt.groupby('Mes', as_index=False)['Ventas'].sum()
 
-# E. UNIÓN FINAL EN TABLA MAESTRA
 df_final = pd.merge(df_ventas_mensual, df_maquilas_mensual, on='Mes', how='outer')
 df_final = pd.merge(df_final, df_clientes_activos, on='Mes', how='left')
 df_final = pd.merge(df_final, df_clientes_nuevos, on='Mes', how='left')
 
-# FORZAR CRONOLOGÍA ESTRICTA
 df_final['Mes_Orden'] = df_final['Mes'].map(posicion_meses)
 df_final = df_final.sort_values('Mes_Orden').drop(columns=['Mes_Orden']).fillna(0)
 df_final = df_final[df_final['Mes'].isin(columnas_master)]
 
-# CÁLCULOS PARA TARJETAS GRANDES
+# CÁLCULOS KPI
 ventas_totales_global = df_final['Ventas'].sum()
 total_clientes_unicos = df_ventas_raw['Nombre'].nunique()
 
@@ -68,7 +59,6 @@ ciudad_lider_ventas = ciudad_lider_info['Ventas']
 numero_meses = len(columnas_master)
 promedio_mensual_por_cliente = (ventas_totales_global / total_clientes_unicos) / numero_meses
 
-# GRÁFICOS
 df_ciudades = df_ventas_melt.groupby('Ciudad', as_index=False)['Ventas'].sum()
 
 df_top_10 = df_ranking_clientes.sort_values('Ventas', ascending=False).head(10)
@@ -84,14 +74,10 @@ df_cliente_perf = df_ventas_raw.groupby('Nombre')[meses_ventas].sum().sum(axis=1
 df_maq_perf = df_maquilas_raw.groupby('Nombre')[meses_maquilas].sum().sum(axis=1).reset_index(name='Total_Maquilas')
 df_analisis = pd.merge(df_cliente_perf, df_maq_perf, on='Nombre', how='outer').fillna(0)
 
-# =========================================================
-# LÓGICA DE CODIFICACIÓN INTELIGENTE DEL LOGO
-# =========================================================
 try:
     encoded_image = base64.b64encode(open('logo.png', 'rb').read())
     logo_src = f'data:image/png;base64,{encoded_image.decode()}'
 except Exception:
-    # Imagen de respaldo amigable en caso de que falte el archivo en GitHub
     logo_src = ""
 
 # =========================================================
@@ -107,7 +93,6 @@ server = app.server
 CARD_STYLE = {"box-shadow": "0 4px 15px rgba(0, 0, 0, 0.05)", "border-radius": "15px", "padding": "25px", "border": "none", "background-color": "#ffffff", "min-height": "140px"}
 
 app.layout = dbc.Container([
-    # NUEVO: Encabezado Superior con Logotipo y Canal de Ventas a la Izquierda
     dbc.Row([
         dbc.Col([
             html.Div([
@@ -121,7 +106,6 @@ app.layout = dbc.Container([
         ], width=8, className="d-flex align-items-center justify-content-end pt-4")
     ], className="mb-4 border-bottom pb-4"),
     
-    # Sistema de Pestañas
     dcc.Tabs(id="tabs-navegacion", value='tab-principal', children=[
         dcc.Tab(label='📌 Resumen', value='tab-principal'),
         dcc.Tab(label='🌡️ Heatmap & Pearson', value='tab-pearson'),
@@ -164,4 +148,11 @@ def alternar_pestanas(tab_seleccionada):
             
             dbc.Row([
                 dbc.Col(dbc.Card([html.H5("Principales Compradores (Top 10)", className="fw-bold text-secondary mb-3"), dcc.Graph(figure=fig_top_10)], style=CARD_STYLE), width=6),
-
+                dbc.Col(dbc.Card([html.H5("Comportamiento y Dinámica Mensual de Clientes", className="fw-bold text-secondary mb-3"), dcc.Graph(figure=fig_clientes)], style=CARD_STYLE), width=6),
+            ], className="g-3")
+        ])
+        
+    elif tab_seleccionada == 'tab-pearson':
+        matriz_corr = df_analisis[['Total_Ventas', 'Total_Maquilas']].corr()
+        fig_heatmap = px.imshow(matriz_corr.values, x=['Ventas Globales', 'Maquilas Generadas'], y=['Ventas Globales', 'Maquilas Generadas'], text_auto=".2f", color_continuous_scale="RdBu_r", aspect="auto")
+        fig_heatmap.update_layout(title_text='Matriz de Relación Lineal de Pearson', title_x=0.5)
