@@ -12,7 +12,7 @@ import base64
 # =========================================================
 # 1. ENLAZAR EXCEL Y PREPARAR DATOS COMERCIALES
 # =========================================================
-archivo_excel = 'tu_archivo.xlsx'
+archivo_excel = 'Informe_Tribu.xlsx'
 
 df_ventas_raw = pd.read_excel(archivo_excel, sheet_name='ventas totales')
 df_maquilas_raw = pd.read_excel(archivo_excel, sheet_name='maquilas')
