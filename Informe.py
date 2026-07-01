@@ -15,7 +15,7 @@ import plotly.express as px
 # =========================================================
 # 1. ENLAZAR EXCEL Y PREPARAR DATOS (CÓDIGO CORREGIDO)
 # =========================================================
-archivo_excel = r"C:\Users\Viviana\OneDrive\Escritorio\BOOTCAMP\PROYECTO\Informe_Tribu.xlsx"
+archivo_excel = "Informe_Tribu.xlsx"
 
 # Leer las hojas del archivo Excel
 df_ventas_raw = pd.read_excel(archivo_excel, sheet_name='ventas totales')
