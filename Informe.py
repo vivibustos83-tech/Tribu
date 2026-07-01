@@ -167,3 +167,5 @@ def alternar_pestanas(tab_seleccionada):
                 dbc.Col(dbc.Card([html.H5("Evolución Mensual Comercial", className="fw-bold text-secondary mb-3"), dcc.Graph(figure=fig_comercial)], style=CARD_STYLE), width=6),
                 dbc.Col(dbc.Card([html.H5("Distribución Geográfica", className="fw-bold text-secondary mb-3"), dcc.Graph(figure=fig_pastel)], style=CARD_STYLE), width=6),
             ], className="g-3 mb-4")
+
+            dbc.Row])
