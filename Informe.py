@@ -1,39 +1,38 @@
 import dash
 from dash import html, dcc, dash_table
 import dash_bootstrap_components as dbc
+from dash.dependencies import Input, Output
 import pandas as pd
 import plotly.express as px
+from sklearn.cluster import KMeans
+import base64  # Requerido para procesar el logotipo de forma segura
 
 # =========================================================
 # 1. ENLAZAR EXCEL Y PREPARAR DATOS
 # =========================================================
-archivo_excel = "Informe_Tribu.xlsx"
+archivo_excel = 'Informe_Tribu.xlsx'
 
 # Leer las hojas del archivo Excel
 df_ventas_raw = pd.read_excel(archivo_excel, sheet_name='ventas totales')
 df_maquilas_raw = pd.read_excel(archivo_excel, sheet_name='maquilas')
 
-# Capturar las columnas de meses en su orden original de Excel
-columnas_meses = [col for col in df_ventas_raw.columns if col not in ['Nombre', 'Ciudad']]
+meses_ventas = [col for col in df_ventas_raw.columns if col not in ['Nombre', 'Ciudad']]
+meses_maquilas = [col for col in df_maquilas_raw.columns if col not in ['Nombre', 'Ciudad']]
+columnas_master = meses_ventas 
 
 # A. Desenrollar VENTAS a formato vertical
-df_ventas_melt = df_ventas_raw.melt(id_vars=['Nombre', 'Ciudad'], var_name='Mes', value_name='Ventas')
-df_ventas_melt['Ventas'] = df_ventas_melt['Ventas'].fillna(0)
+df_ventas_melt = df_ventas_raw.melt(id_vars=['Nombre', 'Ciudad'], var_name='Mes', value_name='Ventas').fillna(0)
+df_maquilas_melt = df_maquilas_raw.melt(id_vars=['Nombre', 'Ciudad'], var_name='Mes', value_name='Maquilas').fillna(0)
 
-# B. LÓGICA DE CLIENTES (A partir de compras reales)
+# B. LÓGICA DE CLIENTES (A partir de ventas reales > 0)
 df_compras_reales = df_ventas_melt[df_ventas_melt['Ventas'] > 0].copy()
-
-# Clientes Mensuales Activos
-df_clientes_activos = df_compras_reales.groupby('Mes')['Nombre'].nunique().reset_index()
-df_clientes_activos.columns = ['Mes', 'Clientes_Mensuales']
+df_clientes_activos = df_compras_reales.groupby('Mes')['Nombre'].nunique().reset_index(name='Clientes_Mensuales')
 
 # Clientes Nuevos
-posicion_meses = {mes: i for i, mes in enumerate(columnas_meses)}
+posicion_meses = {mes: i for i, mes in enumerate(columnas_master)}
 df_compras_reales['Mes_Orden'] = df_compras_reales['Mes'].map(posicion_meses)
 df_primera_compra = df_compras_reales.sort_values('Mes_Orden').groupby('Nombre')['Mes'].first().reset_index()
-df_primera_compra.columns = ['Nombre', 'Mes']
-df_clientes_nuevos = df_primera_compra.groupby('Mes')['Nombre'].count().reset_index()
-df_clientes_nuevos.columns = ['Mes', 'Clientes_Nuevos']
+df_clientes_nuevos = df_primera_compra.groupby('Mes')['Nombre'].count().reset_index(name='Clientes_Nuevos')
 
 # C. Desenrollar MAQUILAS a formato vertical
 df_maquilas_melt = df_maquilas_raw.melt(id_vars=['Nombre', 'Ciudad'], var_name='Mes', value_name='Maquilas')
@@ -47,97 +46,122 @@ df_final = pd.merge(df_ventas_mensual, df_maquilas_mensual, on='Mes', how='outer
 df_final = pd.merge(df_final, df_clientes_activos, on='Mes', how='left')
 df_final = pd.merge(df_final, df_clientes_nuevos, on='Mes', how='left')
 
-# F. ORDENAR CRONOLÓGICAMENTE SEGÚN TU EXCEL
+# FORZAR CRONOLOGÍA ESTRICTA
 df_final['Mes_Orden'] = df_final['Mes'].map(posicion_meses)
 df_final = df_final.sort_values('Mes_Orden').drop(columns=['Mes_Orden']).fillna(0)
+df_final = df_final[df_final['Mes'].isin(columnas_master)]
 
-# G. DATOS ADICIONALES PARA CIUDADES, PEARSON Y K-MEANS
+# CÁLCULOS PARA TARJETAS GRANDES
+ventas_totales_global = df_final['Ventas'].sum()
+total_clientes_unicos = df_ventas_raw['Nombre'].nunique()
+
+df_ranking_clientes = df_ventas_melt.groupby('Nombre', as_index=False)['Ventas'].sum()
+cliente_top_info = df_ranking_clientes.sort_values('Ventas', ascending=False).iloc[0]
+cliente_top_nombre = cliente_top_info['Nombre']
+cliente_top_ventas = cliente_top_info['Ventas']
+
+df_ranking_ciudades = df_ventas_melt.groupby('Ciudad', as_index=False)['Ventas'].sum()
+ciudad_lider_info = df_ranking_ciudades.sort_values('Ventas', ascending=False).iloc[0]
+ciudad_lider_nombre = ciudad_lider_info['Ciudad']
+ciudad_lider_ventas = ciudad_lider_info['Ventas']
+
+numero_meses = len(columnas_master)
+promedio_mensual_por_cliente = (ventas_totales_global / total_clientes_unicos) / numero_meses
+
+# GRÁFICOS
 df_ciudades = df_ventas_melt.groupby('Ciudad', as_index=False)['Ventas'].sum()
 
-# =========================================================
-# GENERACIÓN DE GRÁFICOS ESTÁTICOS INICIALES (EVITA ERRORES EN NUBE)
-# =========================================================
-fig_comercial = px.line(
-    df_final, x='Mes', y=['Ventas', 'Maquilas'],
-    labels={'value': 'Monto / Cantidad', 'variable': 'Métrica'},
-    template="plotly_white", color_discrete_sequence=["#0d6efd", "#ffc107"]
+df_top_10 = df_ranking_clientes.sort_values('Ventas', ascending=False).head(10)
+fig_top_10 = px.bar(
+    df_top_10, x='Ventas', y='Nombre', orientation='h', 
+    title="Top 10 Principales Clientes por Facturación",
+    labels={'Ventas': 'Compras Acumuladas ($)', 'Nombre': 'Razón Social'},
+    template="plotly_white", color='Ventas', color_continuous_scale="Blues"
 )
-fig_comercial.update_layout(margin=dict(l=20, r=20, t=10, b=20), legend=dict(orientation="h", y=1.1))
+fig_top_10.update_layout(yaxis={'categoryorder': 'total ascending'}, margin=dict(l=20, r=20, t=40, b=20))
 
-fig_ciudades = px.bar(
-    df_ciudades, x='Ciudad', y='Ventas', 
-    title="Ventas Consolidadas por Ciudad", template="plotly_white", color='Ciudad'
-)
+df_cliente_perf = df_ventas_raw.groupby('Nombre')[meses_ventas].sum().sum(axis=1).reset_index(name='Total_Ventas')
+df_maq_perf = df_maquilas_raw.groupby('Nombre')[meses_maquilas].sum().sum(axis=1).reset_index(name='Total_Maquilas')
+df_analisis = pd.merge(df_cliente_perf, df_maq_perf, on='Nombre', how='outer').fillna(0)
 
 # =========================================================
-# 2. CONFIGURACIÓN DEL DASHBOARD (DASH)
+# LÓGICA DE CODIFICACIÓN INTELIGENTE DEL LOGO
+# =========================================================
+try:
+    encoded_image = base64.b64encode(open('logo.png', 'rb').read())
+    logo_src = f'data:image/png;base64,{encoded_image.decode()}'
+except Exception:
+    # Imagen de respaldo amigable en caso de que falte el archivo en GitHub
+    logo_src = ""
+
+# =========================================================
+# 2. CONFIGURACIÓN DEL DASHBOARD INTERACTIVO
 # =========================================================
 app = dash.Dash(
     __name__, 
     external_stylesheets=[dbc.themes.FLATLY, "https://googleapis.com"],
-    title="Dashboard EDA — Ventas"
+    title="Dashboard Comercial Avanzado"
 )
-server = app.server  # Enlace crucial para Render
+server = app.server
 
-CARD_STYLE = {"box-shadow": "0 4px 6px rgba(0, 0, 0, 0.05)", "border-radius": "12px", "padding": "20px", "border": "none"}
+CARD_STYLE = {"box-shadow": "0 4px 15px rgba(0, 0, 0, 0.05)", "border-radius": "15px", "padding": "25px", "border": "none", "background-color": "#ffffff", "min-height": "140px"}
 
-# Layout directo con los gráficos precargados (Soluciona la pantalla blanca)
 app.layout = dbc.Container([
+    # NUEVO: Encabezado Superior con Logotipo y Canal de Ventas a la Izquierda
     dbc.Row([
-        dbc.Col(html.H2("Dashboard de Control Comercial", className="fw-bold my-4 text-dark"), width=12)
-    ]),
+        dbc.Col([
+            html.Div([
+                html.Img(src=logo_src, style={'height': '80px', 'margin-bottom': '5px'}) if logo_src else html.Div(),
+                html.H6("ASPM - CANAL B2B", className="text-muted fw-bold tracking-wide", style={'font-size': '12px', 'letter-spacing': '1.5px', 'margin': '0', 'padding-left': '5px'})
+            ], style={'display': 'flex', 'flex-direction': 'column', 'align-items': 'flex-start'})
+        ], width=4, className="d-flex align-items-center pt-4"),
+        
+        dbc.Col([
+            html.H2("Panel Analítico de Control Comercial", className="fw-bold text-end text-dark m-0 w-100")
+        ], width=8, className="d-flex align-items-center justify-content-end pt-4")
+    ], className="mb-4 border-bottom pb-4"),
     
-    # Fila de Tarjetas (Resumen Histórico Total)
-    dbc.Row([
-        dbc.Col(dbc.Card([
-            html.H6("VENTAS TOTALES HISTÓRICAS", className="text-muted small fw-bold"),
-            html.H3(f"${df_final['Ventas'].sum():,.2f}", className="text-primary fw-bold m-0")
-        ], style=CARD_STYLE), width=4),
-        
-        dbc.Col(dbc.Card([
-            html.H6("TOTAL CLIENTES NUEVOS", className="text-muted small fw-bold"),
-            html.H3(f"+{int(df_final['Clientes_Nuevos'].sum())}", className="text-info fw-bold m-0")
-        ], style=CARD_STYLE), width=4),
-        
-        dbc.Col(dbc.Card([
-            html.H6("TOTAL MAQUILAS GENERADAS", className="text-muted small fw-bold"),
-            html.H3(f"{int(df_final['Maquilas'].sum()):,}", className="text-warning fw-bold m-0")
-        ], style=CARD_STYLE), width=4),
-    ], className="g-3 mb-4"),
+    # Sistema de Pestañas
+    dcc.Tabs(id="tabs-navegacion", value='tab-principal', children=[
+        dcc.Tab(label='📌 Resumen', value='tab-principal'),
+        dcc.Tab(label='🌡️ Heatmap & Pearson', value='tab-pearson'),
+        dcc.Tab(label='🔵 K-Means', value='tab-kmeans'),
+    ], className="mb-4", style={'font-family': 'Inter, sans-serif', 'font-weight': '600'}),
     
-    # Fila de Gráficos de la pestaña principal
-    dbc.Row([
-        dbc.Col(dbc.Card([
-            html.H5("Evolución Mensual Financiera", className="fw-bold text-secondary mb-3"),
-            dcc.Graph(figure=fig_comercial) # <--- Cargado directamente
-        ], style=CARD_STYLE), width=6),
-        
-        dbc.Col(dbc.Card([
-            html.H5("Distribución Comercial por Región", className="fw-bold text-secondary mb-3"),
-            dcc.Graph(figure=fig_ciudades) # <--- Cargado directamente
-        ], style=CARD_STYLE), width=6),
-    ], className="g-3 mb-4"),
-
-    # Fila de Tabla
-    dbc.Row([
-        dbc.Col(dbc.Card([
-            html.H5("Consolidado Mensual de Datos", className="fw-bold text-secondary mb-3"),
-            dash_table.DataTable(
-                data=df_final.to_dict('records'),
-                columns=[
-                    {"name": "Mes", "id": "Mes"},
-                    {"name": "Ventas ($)", "id": "Ventas", "type": "numeric", "format": {"specifier": "$,.2f"}},
-                    {"name": "Maquilas (Cant)", "id": "Maquilas", "type": "numeric"},
-                    {"name": "Clientes Activos", "id": "Clientes_Mensuales", "type": "numeric"},
-                    {"name": "Clientes Nuevos", "id": "Clientes_Nuevos", "type": "numeric"}
-                ],
-                style_table={'overflowX': 'auto'},
-                style_cell={'textAlign': 'center', 'font-family': 'Inter, sans-serif', 'padding': '12px'},
-                style_header={'backgroundColor': '#f8f9fa', 'fontWeight': 'bold', 'borderBottom': '2px solid #dee2e6'}
-            )
-        ], style=CARD_STYLE), width=12)
-    ], className="mb-5")
+    html.Div(id='contenido-pestana')
 ], fluid=True)
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+# =========================================================
+# 3. LÓGICA DE PROCESAMIENTO DINÁMICO DE PESTAÑAS
+# =========================================================
+@app.callback(
+    Output('contenido-pestana', 'children'),
+    [Input('tabs-navegacion', 'value')]
+)
+def alternar_pestanas(tab_seleccionada):
+    if tab_seleccionada == 'tab-principal':
+        fig_comercial = px.line(df_final, x='Mes', y=['Ventas', 'Maquilas'], labels={'value': 'Monto / Cantidad', 'variable': 'Métrica'}, template="plotly_white", color_discrete_sequence=["#0d6efd", "#ffc107"])
+        fig_comercial.update_layout(margin=dict(l=20, r=20, t=10, b=20), legend=dict(orientation="h", y=1.1))
+        
+        fig_pastel = px.pie(df_ciudades, values='Ventas', names='Ciudad', title="Participación de Ventas por Ciudad", hole=0.4, template="plotly_white")
+        fig_pastel.update_traces(textinfo='percent+label')
+        
+        fig_clientes = px.bar(df_final, x='Mes', y=['Clientes_Mensuales', 'Clientes_Nuevos'], barmode='group', labels={'value': 'Cantidad de Clientes', 'variable': 'Segmento'}, template="plotly_white", color_discrete_sequence=["#198754", "#0dcaf0"])
+        fig_clientes.update_layout(margin=dict(l=20, r=20, t=10, b=20), legend=dict(orientation="h", y=1.1))
+        
+        return html.Div([
+            dbc.Row([
+                dbc.Col(dbc.Card([html.H6("1. DESEMPEÑO GLOBAL COMERCIAL", className="text-muted small fw-bold mb-2"), html.H3(f"${ventas_totales_global:,.2f}", className="text-primary fw-bold mb-1"), html.P(f"Clientes Activos Totales: {total_clientes_unicos}", className="text-secondary small m-0 fw-medium")], style=CARD_STYLE), width=3),
+                dbc.Col(dbc.Card([html.H6("2. CLIENTE TOP MUNDIAL", className="text-muted small fw-bold mb-2"), html.H4(f"{cliente_top_nombre}", className="text-dark fw-bold text-truncate mb-1"), html.P(f"Total de Compra: ${cliente_top_ventas:,.2f}", className="text-success small m-0 fw-medium")], style=CARD_STYLE), width=3),
+                dbc.Col(dbc.Card([html.H6("3. CIUDAD LÍDER EN MERCADO", className="text-muted small fw-bold mb-2"), html.H3(f"{ciudad_lider_nombre}", className="text-warning fw-bold mb-1"), html.P(f"Aporte Región: ${ciudad_lider_ventas:,.2f}", className="text-secondary small m-0 fw-medium")], style=CARD_STYLE), width=3),
+                dbc.Col(dbc.Card([html.H6("4. PROMEDIO MENSUAL POR CLIENTE", className="text-muted small fw-bold mb-2"), html.H3(f"${promedio_mensual_por_cliente:,.2f}", className="text-info fw-bold mb-1"), html.P("Cálculo medio ponderado", className="text-secondary small m-0")], style=CARD_STYLE), width=3),
+            ], className="g-3 mb-4"),
+            
+            dbc.Row([
+                dbc.Col(dbc.Card([html.H5("Evolución Mensual Comercial", className="fw-bold text-secondary mb-3"), dcc.Graph(figure=fig_comercial)], style=CARD_STYLE), width=6),
+                dbc.Col(dbc.Card([html.H5("Distribución Geográfica", className="fw-bold text-secondary mb-3"), dcc.Graph(figure=fig_pastel)], style=CARD_STYLE), width=6),
+            ], className="g-3 mb-4"),
+            
+            dbc.Row([
+                dbc.Col(dbc.Card([html.H5("Principales Compradores (Top 10)", className="fw-bold text-secondary mb-3"), dcc.Graph(figure=fig_top_10)], style=CARD_STYLE), width=6),
+
