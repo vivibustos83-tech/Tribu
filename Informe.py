@@ -164,6 +164,8 @@ def renderizar_graficas(_):
     
     return fig_comercial, fig_clientes
 
-if __name__ == '__main__':
-    app.run(debug=True)
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.FLATLY])
+server = app.server
 
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=10000)
